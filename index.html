@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Correctus IA - Analisador de Arte</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    
+    <!-- Bibliotecas JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent body scroll */
+        }
+        body { 
+            font-family: "Inter", sans-serif; 
+            background-color: #f7f9fc;
+            transition: background-color 0.4s ease-in-out;
+        }
+        html.dark body {
+            background-color: #121212;
+        }
+        
+        #theme-transition-overlay {
+            position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+            background-color: #f7f9fc; opacity: 0; transition: opacity 0.4s ease-in-out;
+        }
+        html.dark #theme-transition-overlay { background-color: #121212; }
+        
+        #analyzer-panel, #info-container {
+            position: fixed; inset: 0; 
+            display: flex; 
+            align-items: flex-start; 
+            justify-content: center;
+            padding: 1rem; 
+            z-index: 10;
+            overflow-y: auto; /* Make panels scrollable */
+            transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.6s ease-in-out;
+        }
+
+        #info-container { 
+            z-index: 20; 
+            opacity: 0; 
+            transform: scale(1.05); 
+            pointer-events: none;
+        }
+        
+        body.info-active #analyzer-panel { transform: scale(0.95); opacity: 0; pointer-events: none; }
+        body.info-active #info-container { opacity: 1; transform: scale(1); pointer-events: auto; }
+        
+        .glass-panel { 
+            background-color: #ffffff;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.1);
+        }
+        html.dark .glass-panel { 
+            background-color: #1E1E1E;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .custom-file-upload { border: 2px dashed #cfd8dc; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 1rem; width: 100%; border-radius: 0.75rem; transition: all 0.2s ease-in-out; background-color: #eceff1; font-weight: bold; color: #37474f; }
+        .custom-file-upload:hover { border-color: #60a5fa; background-color: #e3f2fd; }
+        html.dark .custom-file-upload { background-color: #263238; border-color: #455a64; color: #b0bec5; }
+        html.dark .custom-file-upload:hover { border-color: #3b82f6; background-color: #37474f; }
+        
+        .media-container { position: relative; width: 100%; max-width: 400px; margin-left: auto; margin-right: auto; aspect-ratio: 1 / 1; background-color: #eceff1; border-radius: 1rem; overflow: hidden; box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05); display: flex; align-items: center; justify-content: center; color: #455a64; }
+        html.dark .media-container { background-color: #2c2c2c; color: #90a4ae; }
+        
+        .prediction-container { display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center; }
+        .prediction-bar-wrapper { width: 100%; background-color: #cfd8dc; border-radius: 9999px; height: 1.25rem; overflow: hidden; }
+        html.dark .prediction-bar-wrapper { background-color: #37474f; }
+        .prediction-bar { background-color: #3b82f6; height: 100%; transition: width 0.2s ease-in-out; }
+        
+        .prediction-percentage { font-size: 0.875rem; font-weight: 600; color: #37474f; width: 50px; text-align: right; }
+        html.dark .prediction-percentage { color: #cfd8dc; }
+
+        #theme-toggle-btn { background-color: #ffffff; border: 1px solid #e0e0e0; }
+        html.dark #theme-toggle-btn { background-color: #1E1E1E; border: 1px solid rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body class="antialiased text-slate-800 dark:text-slate-200">
+
+    <button id="theme-toggle-btn" class="fixed top-4 right-4 z-[10000] p-2 rounded-full text-slate-800 dark:text-slate-200 transition-colors shadow-md">
+        <svg id="theme-toggle-sun-icon" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+        <svg id="theme-toggle-moon-icon" class="h-6 w-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+    </button>
+
+    <div id="analyzer-panel">
+        <main class="w-full max-w-4xl glass-panel shadow-2xl rounded-3xl p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-6 my-auto">
+            <div class="text-center"> 
+                <h1 class="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Analisador de Arte com IA</h1> 
+                <p class="mt-2 text-sm sm:text-base text-slate-600 dark:text-slate-400">Descubra a vida de artistas famosos pelo estilo de suas obras.</p> 
+            </div>
+            <section class="flex flex-col md:flex-row gap-6 md:gap-8 items-center">
+                <div id="media-container" class="media-container w-full md:w-1/2 flex-shrink-0"> 
+                    <div id="status-text" class="status-text flex flex-col items-center gap-2"> 
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg> 
+                        <span>Aguardando início...</span> 
+                    </div> 
+                </div>
+                <div id="label-container" class="w-full md:w-1/2 flex flex-col justify-center space-y-4"></div>
+            </section>
+            <section class="flex flex-col sm:flex-row gap-4">
+                <button id="start-webcam-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-camera h-5 w-5"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                    <span id="webcam-btn-text">Iniciar Webcam</span>
+                </button>
+                <label for="image-upload-input" id="upload-label" class="flex-1 custom-file-upload"> <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-upload-cloud mr-2 h-5 w-5"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg> <span id="upload-label-text">Enviar Imagem</span> </label>
+                <input type="file" id="image-upload-input" class="hidden" accept="image/*"/>
+            </section>
+            <div id="error-container" class="text-center text-red-600 font-semibold bg-red-100 dark:bg-red-900/50 dark:text-red-300 p-3 rounded-lg hidden"></div>
+        </main>
+    </div>
+    
+    <div id="info-container">
+         <div class="relative w-full max-w-4xl mx-auto my-auto pt-8 px-6 pb-6 sm:pt-10 sm:px-8 sm:pb-8 md:pt-12 md:px-12 md:pb-12 glass-panel rounded-3xl shadow-2xl">
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 w-10 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full opacity-70"></div>
+            
+            <div class="text-center md:text-left md:flex md:items-center md:gap-8">
+                <img id="artist-portrait" src="" alt="Retrato do Artista" class="w-32 h-32 md:w-48 md:h-48 rounded-full object-cover mx-auto md:mx-0 shadow-lg border-4 border-white dark:border-gray-800 flex-shrink-0">
+                <div class="mt-4 md:mt-0">
+                    <h2 id="info-artista-nome" class="text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 dark:text-white"></h2>
+                    <p id="artist-lifespan" class="mt-2 text-lg sm:text-xl font-medium text-slate-500 dark:text-slate-400"></p>
+                </div>
+            </div>
+            
+            <div class="mt-8 border-t border-slate-200 dark:border-gray-700 pt-6">
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-4">Biografia</h3>
+                <p id="info-artista-descricao" class="text-base sm:text-lg text-slate-700 dark:text-slate-300 leading-relaxed space-y-4"></p>
+            </div>
+
+            <div id="info-curiosidades-container" class="mt-8 border-t border-slate-200 dark:border-gray-700 pt-6 hidden">
+                <h4 class="text-2xl font-bold text-slate-800 dark:text-slate-100">Curiosidades</h4>
+                <ul id="info-curiosidades-lista" class="mt-4 list-disc list-inside space-y-2 text-slate-700 dark:text-slate-300"></ul>
+            </div>
+        </div>
+    </div>
+    
+    <div id="theme-transition-overlay"></div>
+
+    <script type="text/javascript">
+        document.addEventListener("DOMContentLoaded", function() {
+            try {
+                const URL = "https://teachablemachine.withgoogle.com/models/Aj_NVLyCw/";
+                
+                const themeToggleBtn = document.getElementById('theme-toggle-btn');
+                const sunIcon = document.getElementById('theme-toggle-sun-icon');
+                const moonIcon = document.getElementById('theme-toggle-moon-icon');
+                const overlay = document.getElementById('theme-transition-overlay');
+                let isAnimatingTheme = false;
+
+                const applyTheme = (isDark, withAnimation = false) => {
+                    if (!withAnimation) {
+                        document.documentElement.classList.toggle('dark', isDark);
+                        sunIcon.classList.toggle('hidden', isDark);
+                        moonIcon.classList.toggle('hidden', !isDark);
+                        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                        return;
+                    }
+                    if (isAnimatingTheme) return;
+                    isAnimatingTheme = true;
+                    overlay.style.opacity = '1';
+                    setTimeout(() => {
+                        document.documentElement.classList.toggle('dark', isDark);
+                        sunIcon.classList.toggle('hidden', isDark);
+                        moonIcon.classList.toggle('hidden', !isDark);
+                        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                        overlay.style.opacity = '0';
+                        setTimeout(() => { isAnimatingTheme = false; }, 400);
+                    }, 400);
+                };
+                
+                const isDarkMode = localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                applyTheme(isDarkMode, false);
+                themeToggleBtn.addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('dark'), true));
+
+                let model, webcam, maxPredictions, animationFrameId;
+                let appState = { isWebcamActive: false, isInfoPanelActive: false, lastShownClass: null };
+                const el = { 
+                    body: document.body,
+                    infoContainer: document.getElementById('info-container'),
+                    infoArtistaNome: document.getElementById('info-artista-nome'),
+                    artistPortrait: document.getElementById('artist-portrait'),
+                    artistLifespan: document.getElementById('artist-lifespan'),
+                    infoArtistaDescricao: document.getElementById('info-artista-descricao'),
+                    infoCuriosidadesContainer: document.getElementById('info-curiosidades-container'),
+                    infoCuriosidadesLista: document.getElementById('info-curiosidades-lista'),
+                    labelContainer: document.getElementById("label-container"), 
+                    mediaContainer: document.getElementById("media-container"), 
+                    statusText: document.getElementById("status-text"), 
+                    errorContainer: document.getElementById("error-container"), 
+                    startWebcamBtn: document.getElementById('start-webcam-btn'), 
+                    imageUploadInput: document.getElementById('image-upload-input'), 
+                    uploadLabel: document.getElementById('upload-label'), 
+                    webcamBtnText: document.getElementById('webcam-btn-text'), 
+                    uploadLabelText: document.getElementById('upload-label-text'), 
+                };
+                
+                // --- Webcam Security Check ---
+                const isSecureContext = window.isSecureContext;
+                if (!isSecureContext) {
+                    el.startWebcamBtn.disabled = true;
+                    el.webcamBtnText.textContent = "Webcam Indisponível";
+                    el.startWebcamBtn.title = "A câmara só pode ser acedida em um ambiente seguro (https).";
+                }
+
+                const artData = {
+                    "Pablo Picasso": { lifespan: "1881–1973", portraitUrl: "https://upload.wikimedia.org/wikipedia/commons/9/98/Pablo_picasso_1.jpg", artistaInfo: "Pablo Picasso foi, sem dúvida, um dos gigantes da arte do século XX. Nascido em Málaga, Espanha, demonstrou um talento prodigioso desde a infância. A sua jornada artística foi uma constante evolução, atravessando diversas fases que marcaram a história da arte. Começou com o melancólico 'Período Azul', focado em temas de pobreza e desespero, seguido pelo mais otimista 'Período Rosa'.<br><br>A sua maior revolução veio com a criação do Cubismo, ao lado de Georges Braque. Obras como 'Les Demoiselles d'Avignon' estilhaçaram as convenções da perspectiva e da representação, abrindo caminho para a arte abstrata. Mais tarde, a sua obra 'Guernica' tornou-se um dos mais poderosos manifestos anti-guerra de todos os tempos. Picasso foi incansavelmente prolífico, trabalhando com pintura, escultura, cerâmica e gravura, deixando um legado que continua a inspirar e a desafiar o mundo.", curiosidades: ["O seu nome completo tem 23 palavras.", "É considerado o primeiro a usar a técnica de 'collage' na história da arte.", "A obra 'Les Femmes d'Alger' foi vendida por $179.4 milhões em 2015, um recorde na época."] },
+                    "Van Gogh": { lifespan: "1853–1890", portraitUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Vincent_van_Gogh_-_Self-Portrait_-_Google_Art_Project.jpg/800px-Vincent_van_Gogh_-_Self-Portrait_-_Google_Art_Project.jpg", artistaInfo: "Vincent van Gogh é a personificação do artista atormentado e incompreendido. Holandês de nascença, a sua vida foi uma luta constante contra a pobreza e a doença mental, mas a sua arte é uma explosão de cor e emoção. Em apenas uma década, produziu um corpo de trabalho vasto e revolucionário, que só seria verdadeiramente apreciado após a sua morte.<br><br>As suas pinceladas, espessas e expressivas, transmitem uma energia visceral. Em obras como 'A Noite Estrelada', ele não pintava apenas o que via, mas o que sentia, transformando paisagens em visões cósmicas e espirituais. Os seus girassóis não são apenas flores; são celebrações da vida e da luz, pintados com uma intensidade que reflete a sua alma apaixonada e turbulenta.", curiosidades: ["Van Gogh vendeu apenas uma pintura em vida, 'A Vinha Encarnada'.", "Ele escreveu mais de 800 cartas ao seu irmão Theo, que são um registo precioso da sua mente e do seu processo criativo.", "Pintou mais de 30 autorretratos, uma forma de praticar e de se autoanalisar."] },
+                    "Leonardo daVinci": { lifespan: "1452–1519", portraitUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Francesco_Melzi_-_Portrait_of_Leonardo_-_WGA14795.jpg/800px-Francesco_Melzi_-_Portrait_of_Leonardo_-_WGA14795.jpg", artistaInfo: "Leonardo da Vinci foi muito mais do que um pintor; ele foi a definição do 'Homem da Renascença'. A sua curiosidade era infinita, levando-o a explorar anatomia, engenharia, botânica, música e arquitetura com a mesma paixão que dedicava à arte. Os seus cadernos estão repletos de invenções visionárias, séculos à frente do seu tempo, como o helicóptero e o tanque.<br><br>Na pintura, a sua genialidade reside na sua busca incansável pela perfeição e pelo realismo. Ele desenvolveu a técnica do 'sfumato', criando transições de luz e sombra tão suaves que as suas figuras parecem respirar. A 'Mona Lisa' não é apenas um retrato; é um estudo profundo da psicologia humana, capturado no seu sorriso enigmático. 'A Última Ceia' é uma obra-prima de composição e drama, onde cada apóstolo reage de forma única à notícia da traição.", curiosidades: ["A 'Mona Lisa' foi roubada do Louvre em 1911, o que ajudou a cimentar a sua fama mundial.", "Leonardo era ambidestro e praticava a escrita espelhada (da direita para a esquerda), possivelmente para proteger as suas anotações.", "Realizou mais de 30 dissecações de corpos humanos para estudar anatomia, o que deu um realismo sem precedentes às suas figuras."] },
+                    "Caravaggio": { lifespan: "1571–1610", portraitUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Caravaggio_Borghese.jpg/800px-Caravaggio_Borghese.jpg", artistaInfo: "Michelangelo Merisi da Caravaggio foi o rebelde do Barroco italiano. A sua vida foi curta, violenta e cheia de escândalos, mas a sua arte foi uma revolução. Ele trouxe o drama das ruas para as cenas sagradas, usando modelos do povo, com rostos enrugados e pés sujos, para representar santos e anjos. Rejeitou a beleza idealizada da Renascença em favor de um realismo cru e visceral.<br><br>A sua maior inovação foi o 'tenebrismo', um uso radical de luz e sombra. Um foco de luz intenso ilumina as suas cenas, emergindo de uma escuridão profunda, criando uma tensão dramática e um realismo quase cinematográfico. Obras como 'A Vocação de São Mateus' não são apenas pinturas; são momentos congelados no tempo, carregados de emoção e significado divino.", curiosidades: ["Tinha um temperamento explosivo e esteve envolvido em várias brigas, chegando a ser condenado à morte por assassinato.", "A sua influência foi tão grande que deu origem a um estilo seguido por muitos artistas, conhecido como 'Caravaggismo'.", "A sua última obra conhecida, 'O Martírio de Santa Úrsula', foi pintada em 1610, pouco antes da sua morte misteriosa."] },
+                    "Tarsila do Amaral": { lifespan: "1886–1973", portraitUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Tarsila_do_Amaral_em_1925.jpg/800px-Tarsila_do_Amaral_em_1925.jpg", artistaInfo: "Tarsila do Amaral é um dos pilares da arte moderna no Brasil. Após estudar em Paris e absorver as vanguardas europeias, como o Cubismo, ela regressou ao Brasil com uma missão: criar uma arte que fosse autenticamente brasileira. Ela fundiu as técnicas modernas com as cores vibrantes e os temas da sua terra natal.<br><br>A sua obra mais icónica, 'Abaporu', deu origem ao Movimento Antropofágico, que propunha 'devorar' a cultura estrangeira e digeri-la para criar algo novo e nosso. As suas pinturas são repletas de paisagens tropicais, figuras imaginárias e uma paleta de cores 'caipiras' (azul-puríssimo, rosa-violáceo, amarelo-vivo) que celebram a identidade e a cultura do Brasil.", curiosidades: ["'Abaporu' é a pintura mais valorizada da arte brasileira, atualmente no MALBA, em Buenos Aires.", "Tarsila fazia parte do 'Grupo dos Cinco', junto com Anita Malfatti, Oswald de Andrade, Mário de Andrade e Menotti Del Picchia.", "Ela desenhou a capa do primeiro livro de poemas de Oswald de Andrade, 'Pau-Brasil'."] }
+                };
+                
+                function updateState(newState, data = {}) { 
+                    if (newState === 'SHOWING_INFO') { 
+                        if (appState.isInfoPanelActive) return; 
+                        const artInfo = artData[data.className]; 
+                        if (!artInfo) return; 
+                        appState.isInfoPanelActive = true; 
+                        appState.lastShownClass = data.className; 
+                        el.body.classList.add('info-active');
+                        el.infoArtistaNome.textContent = data.className; 
+                        el.artistPortrait.src = artInfo.portraitUrl;
+                        el.artistLifespan.textContent = artInfo.lifespan;
+                        el.infoArtistaDescricao.innerHTML = artInfo.artistaInfo;
+                        el.infoCuriosidadesLista.innerHTML = '';
+                        if (artInfo.curiosidades && artInfo.curiosidades.length > 0) {
+                            artInfo.curiosidades.forEach(fact => {
+                                const li = document.createElement('li');
+                                li.textContent = fact;
+                                el.infoCuriosidadesLista.appendChild(li);
+                            });
+                            el.infoCuriosidadesContainer.classList.remove('hidden');
+                        } else {
+                            el.infoCuriosidadesContainer.classList.add('hidden');
+                        }
+                    } else if (newState === 'ANALYZING') { 
+                        if (!appState.isInfoPanelActive) return; 
+                        appState.isInfoPanelActive = false; 
+                        appState.lastShownClass = null; 
+                        el.body.classList.remove('info-active'); 
+                    } 
+                }
+                async function predict(imageSource) { 
+                    if (!model) return; 
+                    const prediction = await model.predict(imageSource); 
+                    const topPrediction = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current); 
+                    if (topPrediction.probability > 0.90 && topPrediction.className !== appState.lastShownClass) { 
+                        updateState('SHOWING_INFO', { className: topPrediction.className }); 
+                    } 
+                    prediction.forEach((item, i) => { 
+                        const child = el.labelContainer.children[i]; 
+                        if (child) { 
+                            child.querySelector('.prediction-label').textContent = item.className; 
+                            child.querySelector('.prediction-bar').style.width = Math.round(item.probability * 100) + '%'; 
+                            child.querySelector('.prediction-percentage').textContent = (item.probability * 100).toFixed(1) + '%'; 
+                        } 
+                    }); 
+                }
+                async function initWebcam() {
+                    if (!isSecureContext) {
+                        showError("A câmara requer um ambiente seguro (https).");
+                        return;
+                    }
+                    updateState('ANALYZING');
+                    if (appState.isWebcamActive) return;
+                    cancelAnimationFrame(animationFrameId);
+                    try {
+                        await loadModel();
+                        updateStatus('Acessando câmera...', false);
+                        webcam = new tmImage.Webcam(300, 300, true);
+                        await webcam.setup();
+                        await webcam.play();
+                        appState.isWebcamActive = true;
+                        el.mediaContainer.innerHTML = '';
+                        el.mediaContainer.appendChild(webcam.canvas);
+                        animationFrameId = window.requestAnimationFrame(loop);
+                    } catch (error) {
+                        console.error("Webcam Error:", error);
+                        showError("Não foi possível aceder à webcam. Verifique as permissões.");
+                        updateStatus('Aguardando início...');
+                    }
+                }
+                async function handleImageUpload(event) { updateState('ANALYZING'); const file = event.target.files[0]; if (!file) return; if (webcam && webcam.running) { await webcam.stop(); appState.isWebcamActive = false; } cancelAnimationFrame(animationFrameId); try { await loadModel(); updateStatus('Lendo arquivo...', false); el.mediaContainer.innerHTML = ''; el.mediaContainer.appendChild(el.statusText); const reader = new FileReader(); reader.onerror = () => { showError("Ocorreu um erro ao ler o arquivo."); updateStatus('Aguardando início...'); }; reader.onload = (e) => { const image = new Image(); image.onload = async () => { image.style.width = '100%'; image.style.height = '100%'; image.style.objectFit = 'cover'; el.mediaContainer.innerHTML = ''; el.mediaContainer.appendChild(image); updateStatus('', false); await predict(image); }; image.onerror = () => { showError("O ficheiro não é uma imagem válida."); updateStatus('Aguardando início...'); }; image.src = e.target.result; }; reader.readAsDataURL(file); el.uploadLabelText.textContent = file.name; } catch (error) { updateStatus('Aguardando início...'); } }
+                
+                el.startWebcamBtn.addEventListener('click', initWebcam);
+                el.imageUploadInput.addEventListener('change', handleImageUpload);
+                
+                let touchStartY = 0;
+                const scrollThreshold = 50;
+
+                el.infoContainer.addEventListener('wheel', (e) => {
+                    if (e.deltaY < 0 && el.infoContainer.scrollTop === 0) {
+                        e.preventDefault();
+                        updateState('ANALYZING');
+                    }
+                });
+                el.infoContainer.addEventListener('touchstart', (e) => {
+                    if (e.touches.length === 1) touchStartY = e.touches[0].clientY;
+                }, { passive: true });
+                el.infoContainer.addEventListener('touchend', (e) => {
+                    if (el.infoContainer.scrollTop === 0) {
+                        const swipeDistance = e.changedTouches[0].clientY - touchStartY;
+                        if (swipeDistance > scrollThreshold) updateState('ANALYZING');
+                    }
+                    touchStartY = 0;
+                });
+
+                function createLabelElements() { el.labelContainer.innerHTML = ''; for (let i = 0; i < maxPredictions; i++) { el.labelContainer.innerHTML += `<div class="space-y-1"><span class="prediction-label text-sm font-semibold text-slate-700 dark:text-slate-300">Aguardando...</span><div class="prediction-container"><div class="prediction-bar-wrapper"><div class="prediction-bar" style="width: 0%"></div></div><div class="prediction-percentage">0.0%</div></div></div>`; } }
+                function updateStatus(message = '', showIcon = true) { el.statusText.querySelector('span').textContent = message; el.statusText.querySelector('svg').style.display = showIcon ? 'block' : 'none'; el.statusText.style.display = message ? 'flex' : 'none'; }
+                function showError(message) { el.errorContainer.textContent = message; el.errorContainer.classList.remove('hidden'); }
+                function hideError() { el.errorContainer.classList.add('hidden'); }
+                async function loop() { if (!appState.isWebcamActive) return; webcam.update(); await predict(webcam.canvas); animationFrameId = window.requestAnimationFrame(loop); }
+                async function loadModel() { if (model) return; hideError(); setButtonsState(true); updateStatus('Carregando modelo...', false); try { const modelURL = URL + "model.json"; const metadataURL = URL + "metadata.json"; model = await tmImage.load(modelURL, metadataURL); maxPredictions = model.getTotalClasses(); createLabelElements(); } catch (error) { showError("Falha ao carregar o modelo."); throw error; } finally { setButtonsState(false); } }
+                function setButtonsState(isLoading) {
+                    if (!isSecureContext) {
+                        el.startWebcamBtn.disabled = true;
+                    } else {
+                        el.startWebcamBtn.disabled = isLoading;
+                    }
+                    el.imageUploadInput.disabled = isLoading;
+                    el.webcamBtnText.textContent = isLoading ? 'Carregando...' : (isSecureContext ? 'Iniciar Webcam' : 'Webcam Indisponível');
+                    el.uploadLabel.style.cursor = isLoading ? 'wait' : 'pointer';
+                }
+                
+                maxPredictions = 5; 
+                createLabelElements();
+            } catch (error) {
+                console.error("Ocorreu um erro crítico ao iniciar a aplicação:", error);
+                document.body.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-red-100 text-red-700 p-8">Erro Crítico: ${error.message}. Por favor, recarregue a página.</div>`;
+            }
+        });
+    </script>
+</body>
+</html>
